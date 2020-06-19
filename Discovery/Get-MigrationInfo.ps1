@@ -11,25 +11,26 @@ Collects data necessary for quoting your mailbox migration.
 
 (c) 2019 Pax8
 
-## Disclaimer
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, TITLE AND NON-INFRINGEMENT. IN NO EVENT SHALL THE COPYRIGHT HOLDERS OR ANYONE DISTRIBUTING THE SOFTWARE BE LIABLE FOR ANY DAMAGES OR OTHER LIABILITY, WHETHER IN CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-
 #>
 #Requires -Version 5.0
+#Requires -PSEdition Desktop
 Write-Host "Welcome to the Pax8 Professional Services - Migration Discovery Tool!" -ForegroundColor Green;
 
 $isExo = Read-Host "Is this discovery for an Office 365 to Office 365 Migration? (y/n)"
 $pDomain = Read-Host "Enter the primary domain being migrated"
+$isUsingNewEOModule = $false;
 function Connect-EOCustom {
     if(Get-Command Connect-ExchangeOnline -ErrorAction SilentlyContinue) {
         #The new module is installed
         Write-Host "You have the modern management shell installed, it will be used to connect to EO!" -ForegroundColor Green;
         Import-Module ExchangeOnlineManagement;
+        $isUsingNewEOModule = $true;
         Connect-ExchangeOnline;
     } else {
         #the new module is not installed
         Write-Host "NOTICE: You are not using the modern management shell. The old shell will soon be deprecated, but the script will continue for now." -ForegroundColor Yellow;
         Write-Host "It is strongly recommended that you install the new shell using Install-Module -Name ExchangeOnlineManagement" -ForegroundColor Yellow;
+        Write-Host "[!!] Certain tests will be skipped as they are written for the new module!" -ForegroundColor Red;
         Pause;
         $UserCredential = Get-Credential;
         try {
@@ -58,7 +59,7 @@ if($eo) {
 if($eo) {
 
     Connect-EOCustom;
-
+    
 } else {
     if(Get-Command Get-Mailbox -ErrorAction SilentlyContinue) {
         Write-Host "Verified that you're using Exchange Management Shell" -ForegroundColor Green;
@@ -85,7 +86,7 @@ class MailboxCsvRow {
     [object] ${FirstName}
     [object] ${LastName}
     [object] ${PrimarySmtpAddress}
-    #[object] ${Size}
+    [object] ${Size}
     [object] ${RecipientTypeDetails}
 }
 
@@ -99,7 +100,7 @@ class BTRow {
 Write-Host "Doing initial data queries. This may take a moment, please be patient." -ForegroundColor Green;
 Write-Progress -Activity "Mailbox Data Gathering" -Status "Getting Mailboxes";
 
-$mailboxes = Get-Mailbox -ResultSize Unlimited;
+$mailboxes = Get-Recipient -ResultSize Unlimited;
 Write-Progress -Activity "Mailbox Data Gathering" -Status "Getting Distribution Lists";
 $distributionLists = Get-DistributionGroup -ResultSize Unlimited | Select-Object Name,DisplayName,Alias,PrimarySmtpAddress,ManagedBy;
 Write-Host "Exporting distribution lists to $dataFolder\distiLists.csv" -ForegroundColor Cyan;
@@ -112,10 +113,26 @@ $outputBittitanArray = @();
 Write-Progress -Activity "Mailbox Data Gathering" -Status "Building Reports";
 
 foreach ($mailbox in $mailboxes) {
-    $displayName = $mailbox.DisplayName;
     $em = $mailbox.PrimarySmtpAddress;
-    $firstName,$lastName = $displayName.split(" ");
-    #$mbSize = (Get-MailboxStatistics $em).TotalItemSize.Value;
+    $firstName = $mailbox.FirstName;
+    $lastName = $mailbox.LastName;
+    if($eo) {
+        if($mailbox.RecipientTypeDetails -eq "UserMailbox" -or $mailbox.RecipientTypeDetails -eq "GroupMailbox" -or $mailbox.RecipientTypeDetails -eq "SharedMailbox") {
+            if($isUsingNewEOModule) {
+                $mailboxId = $mailbox.ExternalDirectoryObjectId
+                $mbSize = (Get-EXOMailboxStatistics $mailboxId).TotalItemSize.Value;
+            } else {
+                $mbSize = "Not Measured Due to Legacy PowerShell"
+            }
+            
+        } else {
+            $mbSize = "Not Measured due to Mailbox Type"
+        }
+        
+    } else {
+        $mbSize = "Not Measured"
+    }
+    
 
     $bittitanRow = [BTRow]::new();
     $bittitanRow.FirstName = $firstName;
@@ -129,7 +146,7 @@ foreach ($mailbox in $mailboxes) {
     $mailboxRow.FirstName = $firstName;
     $mailboxRow.LastName = $lastName;
     $mailboxRow.PrimarySmtpAddress = $mailbox.PrimarySmtpAddress
-    #$mailboxRow.Size = $mbSize;
+    $mailboxRow.Size = $mbSize;
     $mailboxRow.RecipientTypeDetails = $mailbox.RecipientTypeDetails;
     $outputMailboxArray += $mailboxRow;
     Write-Host "Did $em" -ForegroundColor Gray;
@@ -173,8 +190,8 @@ $doPublicFolderGathering = Read-Host "Include public folders (y/n)?";
 if($doPublicFolderGathering -eq "y" -or $doPublicFolderGathering -eq "Y") {
     Write-Progress -Activity "Public Folder Data Gathering" -Status "Getting Public Folders";
     Write-Host "Getting public folder data. This may take a moment." -ForegroundColor Green;
-    $pf = Get-PublicFolderStatistics -ResultSize Unlimited | Select Name, ItemCount, TotalItemSize, LastUserAccessTime, LastUserModificationTime;
-    $pfs = Get-PublicFolder -Recurse | Select Identity;
+    $pf = Get-PublicFolderStatistics -ResultSize Unlimited | Select-Object Name, ItemCount, TotalItemSize, LastUserAccessTime, LastUserModificationTime;
+    $pfs = Get-PublicFolder -Recurse | Select-Object Identity;
     Write-Progress -Activity "Public Folder Data Gathering" -Status "Writing Reports";
     Write-Host "Exporting public folder data to $dataFolder\pf.csv and $dataFolder\pf-structure.csv";
     $pf | Export-Csv -Path "$dataFolder\pf.csv" -NoTypeInformation;
