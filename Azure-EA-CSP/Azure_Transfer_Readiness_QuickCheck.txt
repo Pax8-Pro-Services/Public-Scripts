@@ -1,0 +1,12 @@
+# WARNING: Use this launcher and the script at your own risk. They are provided "as is" without warranties or guarantees.
+# Review and validate the output before relying on it; you are responsible for resulting decisions and actions.
+# Paste in PowerShell after placing Azure_Transfer_Readiness_Check.ps1 in the current folder.
+# Uses your EXISTING signed-in Azure public-cloud tenant; never signs in or changes context.
+# Optional: add -TenantId "<tenant-guid>" -SubscriptionIds "<sub-guid>","<sub-guid>"
+# OutputPath is a file prefix; writes .json and .txt, UTF-8 without BOM.
+$scriptFile = Join-Path (Get-Location).Path 'Azure_Transfer_Readiness_Check.ps1'
+if (-not (Test-Path -LiteralPath $scriptFile -PathType Leaf)) {
+    throw 'Missing Azure_Transfer_Readiness_Check.ps1. Place the full script in the current folder first.'
+}
+& $scriptFile -OutputPath '.\AzureTransferReadiness'
+# Read coverage and manualChecks: observed inventory is NOT transfer approval or a complete purchase census.
